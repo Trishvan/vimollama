@@ -323,6 +323,9 @@ NC='\033[0m' # No Color
 INSTALL_DIR="/usr/local/bin"
 VIM_PLUGIN_DIR="$HOME/.vim/pack/llama/start/vim-llama"
 CONFIG_FILE="$HOME/.llama-agent.json"
+BINARY_NAME="llama-agent"
+BUILD_DIR="build"
+SOURCE_DIR="server"
 
 # Logging functions
 log_info() {
@@ -384,9 +387,231 @@ check_dependencies() {
 build_agent() {
     log_info "Building llama-agent..."
     
-    if [ ! -d "server" ]; then
-        log_ 
-```
+    if [ ! -d "$SOURCE_DIR" ]; then
+        log_error "Source directory '$SOURCE_DIR' not found. Are you in the project root?"
+        exit 1
+    fi
+    
+    # Create build directory
+    mkdir -p "$BUILD_DIR"
+    
+    # Get version from git or use 'dev'
+    VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+    LDFLAGS="-ldflags \"-X main.Version=$VERSION\""
+    
+    # Build the binary
+    cd "$SOURCE_DIR"
+    eval "go build $LDFLAGS -o ../$BUILD_DIR/$BINARY_NAME ."
+    cd ..
+    
+    if [ ! -f "$BUILD_DIR/$BINARY_NAME" ]; then
+        log_error "Build failed. Binary not found at $BUILD_DIR/$BINARY_NAME"
+        exit 1
+    fi
+    
+    log_success "Build complete: $BUILD_DIR/$BINARY_NAME"
+}
+
+# Install binary
+install_binary() {
+    log_info "Installing binary to $INSTALL_DIR..."
+    
+    # Check if we need sudo
+    if [ ! -w "$INSTALL_DIR" ]; then
+        log_info "Need sudo privileges to install to $INSTALL_DIR"
+        sudo cp "$BUILD_DIR/$BINARY_NAME" "$INSTALL_DIR/"
+        sudo chmod +x "$INSTALL_DIR/$BINARY_NAME"
+    else
+        cp "$BUILD_DIR/$BINARY_NAME" "$INSTALL_DIR/"
+        chmod +x "$INSTALL_DIR/$BINARY_NAME"
+    fi
+    
+    log_success "Binary installed to $INSTALL_DIR/$BINARY_NAME"
+}
+
+# Install Vim plugin
+install_vim_plugin() {
+    log_info "Installing Vim plugin..."
+    
+    # Create plugin directories
+    mkdir -p "$VIM_PLUGIN_DIR/plugin"
+    mkdir -p "$VIM_PLUGIN_DIR/autoload/asyncomplete/sources"
+    mkdir -p "$VIM_PLUGIN_DIR/doc"
+    
+    # Copy plugin files
+    if [ -f "plugin/llama.vim" ]; then
+        cp "plugin/llama.vim" "$VIM_PLUGIN_DIR/plugin/"
+        log_success "Main plugin installed"
+    else
+        log_warning "plugin/llama.vim not found, skipping main plugin"
+    fi
+    
+    if [ -f "autoload/asyncomplete/sources/llama.vim" ]; then
+        cp "autoload/asyncomplete/sources/llama.vim" "$VIM_PLUGIN_DIR/autoload/asyncomplete/sources/"
+        log_success "Asyncomplete integration installed"
+    else
+        log_warning "Asyncomplete integration not found, skipping"
+    fi
+    
+    # Copy documentation if it exists
+    if [ -f "doc/llama.txt" ]; then
+        cp "doc/llama.txt" "$VIM_PLUGIN_DIR/doc/"
+    fi
+    
+    log_success "Vim plugin installed to $VIM_PLUGIN_DIR"
+}
+
+# Create default configuration
+create_config() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_info "Creating default configuration..."
+        cat > "$CONFIG_FILE" << EOF
+{
+  "model": "llama3.2",
+  "temperature": 0.3,
+  "max_tokens": 500,
+  "context_lines": 50,
+  "timeout_seconds": 30,
+  "project_root": "",
+  "enable_logging": false
+}
+EOF
+        log_success "Default config created at $CONFIG_FILE"
+    else
+        log_info "Configuration file already exists at $CONFIG_FILE"
+    fi
+}
+
+# Check Ollama setup
+check_ollama_setup() {
+    if command_exists ollama; then
+        log_info "Checking Ollama setup..."
+        
+        # Check if Ollama is running
+        if ! pgrep -f "ollama serve" > /dev/null 2>&1; then
+            log_warning "Ollama server doesn't appear to be running"
+            log_info "You may need to start it with: ollama serve"
+        else
+            log_success "Ollama server is running"
+        fi
+        
+        # Check if llama3.2 model is available
+        if ollama list 2>/dev/null | grep -q "llama3.2"; then
+            log_success "llama3.2 model is available"
+        else
+            log_warning "llama3.2 model not found"
+            log_info "You can install it with: ollama pull llama3.2"
+        fi
+    fi
+}
+
+# Test installation
+test_installation() {
+    log_info "Testing installation..."
+    
+    # Test binary
+    if command_exists "$BINARY_NAME"; then
+        log_success "Binary is accessible from PATH"
+        
+        # Test config command
+        if "$BINARY_NAME" config >/dev/null 2>&1; then
+            log_success "Agent responds to config command"
+        else
+            log_warning "Agent config command failed (this is normal if Ollama isn't set up)"
+        fi
+    else
+        log_error "Binary not found in PATH"
+        log_error "Make sure $INSTALL_DIR is in your PATH"
+        return 1
+    fi
+    
+    # Test Vim plugin
+    if [ -f "$VIM_PLUGIN_DIR/plugin/llama.vim" ]; then
+        log_success "Vim plugin files are in place"
+    else
+        log_warning "Vim plugin files not found"
+    fi
+}
+
+# Print next steps
+print_next_steps() {
+    echo ""
+    log_success "Installation complete!"
+    echo ""
+    echo "Next steps:"
+    echo "1. Make sure Ollama is running:"
+    echo "   ollama serve"
+    echo ""
+    echo "2. Pull the LLaMA model:"
+    echo "   ollama pull llama3.2"
+    echo ""
+    echo "3. Test the installation:"
+    echo "   $BINARY_NAME config"
+    echo ""
+    echo "4. In Vim, try these commands:"
+    echo "   :LlamaHelp"
+    echo "   :LlamaStatus"
+    echo ""
+    echo "5. Add to your ~/.vimrc:"
+    echo "   let g:llama_agent_path = '$INSTALL_DIR/$BINARY_NAME'"
+    echo "   let g:llama_agent_model = 'llama3.2'"
+    echo ""
+    echo "For more information, see the README.md file."
+}
+
+# Main installation function
+main() {
+    echo "LLaMA Agent Installer"
+    echo "===================="
+    echo ""
+    
+    # Check if we're in the right directory
+    if [ ! -f "README.md" ] || [ ! -d "$SOURCE_DIR" ]; then
+        log_error "Please run this script from the project root directory"
+        log_error "Expected to find README.md and $SOURCE_DIR/ directory"
+        exit 1
+    fi
+    
+    # Run installation steps
+    check_dependencies
+    build_agent
+    install_binary
+    install_vim_plugin
+    create_config
+    check_ollama_setup
+    test_installation
+    print_next_steps
+}
+
+# Handle command line arguments
+case "${1:-}" in
+    --help|-h)
+        echo "Usage: $0 [OPTIONS]"
+        echo ""
+        echo "Options:"
+        echo "  --help, -h     Show this help message"
+        echo "  --uninstall    Uninstall llama-agent"
+        echo ""
+        exit 0
+        ;;
+    --uninstall)
+        log_info "Uninstalling llama-agent..."
+        sudo rm -f "$INSTALL_DIR/$BINARY_NAME" 2>/dev/null || rm -f "$INSTALL_DIR/$BINARY_NAME"
+        rm -rf "$VIM_PLUGIN_DIR"
+        log_info "You may also want to remove $CONFIG_FILE"
+        log_success "Uninstall complete"
+        exit 0
+        ;;
+    "")
+        # No arguments, proceed with installation
+        main
+        ;;
+    *)
+        log_error "Unknown option: $1"
+        echo "Use --help for usage information"
+        exit 1
+        ;;
+esac```
 ---
 
 ## 🤝 Contributing
