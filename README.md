@@ -611,7 +611,8 @@ case "${1:-}" in
         echo "Use --help for usage information"
         exit 1
         ;;
-esac```
+esac
+```
 ---
 
 ## 🤝 Contributing

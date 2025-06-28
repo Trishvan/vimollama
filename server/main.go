@@ -45,7 +45,7 @@ type CompletionResponse struct {
 }
 
 var defaultConfig = Config{
-	Model:        "llama3.2",
+	Model:        "starcoder2:latest",
 	Temperature:  0.3,
 	MaxTokens:    500,
 	ContextLines: 50,
