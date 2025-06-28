@@ -385,7 +385,8 @@ build_agent() {
     log_info "Building llama-agent..."
     
     if [ ! -d "server" ]; then
-        log_
+        log_ 
+```
 ---
 
 ## 🤝 Contributing
