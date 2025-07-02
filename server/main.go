@@ -154,8 +154,22 @@ func handleComplete(config Config) {
 		fmt.Printf("Error: %s\n", response.Error)
 		os.Exit(1)
 	}
-	
-	fmt.Print(response.Content)
+
+	// Compare the completion with the code after the cursor and only output new lines
+	lines := strings.Split(request.Content, "\n")
+	afterCursor := []string{}
+	if request.CursorLine < len(lines) {
+		afterCursor = lines[request.CursorLine:]
+	}
+	completionLines := strings.Split(response.Content, "\n")
+	i := 0
+	for ; i < len(completionLines) && i < len(afterCursor); i++ {
+		if strings.TrimSpace(completionLines[i]) != strings.TrimSpace(afterCursor[i]) {
+			break
+		}
+	}
+	newCode := strings.Join(completionLines[i:], "\n")
+	fmt.Print(newCode)
 }
 
 func handleChat(config Config) {
@@ -363,7 +377,7 @@ func collectProjectContext(config Config, targetFile string) string {
 
 func isRelevantFile(path string) bool {
 	extensions := []string{".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hxx", 
-					     ".go", ".py", ".js", ".ts", ".java", ".rs", ".rb"}
+						 ".go", ".py", ".js", ".ts", ".java", ".rs", ".rb"}
 	
 	for _, ext := range extensions {
 		if strings.HasSuffix(path, ext) {

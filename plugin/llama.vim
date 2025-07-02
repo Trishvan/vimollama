@@ -237,23 +237,55 @@ function! s:HandleCompletion(channel, msg)
     return
   endif
 
-  " Open result in new split
+  let l:code = s:ExtractCodeFromResponse(a:msg)
+  if empty(l:code)
+    echo "LLaMA: No code found in completion"
+    return
+  endif
+
+  let l:code = substitute(l:code, '^\s*', '', '')
+  let l:code = substitute(l:code, '\r', '', 'g')
+  let l:code = substitute(l:code, '\n', '\r\n', 'g')
+  let l:code = substitute(l:code, '^  \+', '\t', 'g')
+  let l:code = substitute(l:code, '^ +', '\t', 'g')
+
+  " Store original buffer and position
+  let b:llama_orig_buf = bufnr('#')
+  let b:llama_orig_pos = getpos('.')
+
   new
   setlocal buftype=nofile bufhidden=wipe nobuflisted noswapfile
   setlocal filetype=text
   file LLaMA_Completion
-  
-  " Insert the completion
-  put =a:msg
+  call setline(1, split(l:code, '\n'))
   normal! ggdd
-  
-  " Syntax highlighting based on original file type
-  let l:original_ft = getbufvar('#', '&filetype')
+
+  let l:original_ft = getbufvar(b:llama_orig_buf, '&filetype')
   if !empty(l:original_ft)
     execute 'setlocal filetype=' . l:original_ft
   endif
-  
-  echo "LLaMA: Completion ready"
+
+  " Map <Tab> to insert completion into original buffer
+  nnoremap <buffer> <Tab> :call s#LlamaInsertCompletion()<CR>
+  echo "LLaMA: Completion ready. Press <Tab> to insert."
+
+" Insert completion from completion buffer into original buffer at saved position
+function! s#LlamaInsertCompletion() abort
+  if !exists('b:llama_orig_buf') || !exists('b:llama_orig_pos')
+    echo "LLaMA: No original buffer info."
+    return
+  endif
+  let l:lines = getline(1, '$')
+  let l:buf = b:llama_orig_buf
+  let l:pos = b:llama_orig_pos
+  execute 'b' . l:buf
+  call setpos('.', l:pos)
+  call append(line('.')-1, l:lines)
+  " Move cursor to end of inserted text
+  call setpos('.', [l:buf, l:pos[1]+len(l:lines), 1, 0])
+  " Close the completion buffer
+  execute 'bdelete! LLaMA_Completion'
+endfunction
 endfunction
 
 " Handle inline completion (insert at cursor)
@@ -263,19 +295,23 @@ function! s:HandleInlineCompletion(channel, msg)
     return
   endif
 
-  " Clean up the response (remove extra whitespace/newlines for inline)
-  let l:clean_msg = substitute(a:msg, '\n\+$', '', '')
-  let l:lines = split(l:clean_msg, '\n')
-  
+  let l:code = s:ExtractCodeFromResponse(a:msg)
+  if empty(l:code)
+    echo "LLaMA: No code found in completion"
+    return
+  endif
+
+  let l:code = substitute(l:code, '^\s*', '', '')
+  let l:code = substitute(l:code, '\r', '', 'g')
+  let l:code = substitute(l:code, '^  \+', '\t', 'g')
+  let l:code = substitute(l:code, '^ +', '\t', 'g')
+  let l:lines = split(l:code, '\n')
+
   if len(l:lines) == 1
-    " Single line completion - insert at cursor
-    let l:completion = l:lines[0]
-    execute "normal! a" . l:completion
+    execute "normal! a" . l:lines[0]
   else
-    " Multi-line completion - insert with proper indentation
     let l:current_indent = indent('.')
-    let l:indent_str = repeat(' ', l:current_indent)
-    
+    let l:indent_str = repeat('\t', l:current_indent)
     for i in range(len(l:lines))
       if i == 0
         execute "normal! a" . l:lines[i]
@@ -284,8 +320,46 @@ function! s:HandleInlineCompletion(channel, msg)
       endif
     endfor
   endif
-  
+
   echo "LLaMA: Completion inserted"
+
+" Extract only the code block from the response, fallback to first code-looking lines
+function! s:ExtractCodeFromResponse(msg) abort
+  let l:lines = split(a:msg, '\n')
+  let l:code = []
+  let l:in_code = 0
+  for l:line in l:lines
+    if l:line =~ '^```'
+      if l:in_code
+        break
+      else
+        let l:in_code = 1
+        continue
+      endif
+    endif
+    if l:in_code
+      call add(l:code, l:line)
+    endif
+  endfor
+  if !empty(l:code)
+    return join(l:code, "\n")
+  endif
+  " Fallback: return first non-empty, non-explanation lines
+  let l:filtered = []
+  for l:line in l:lines
+    if l:line =~? '^\s*\(here''s the completion\|the completion is\|complete with\|suggestion\|explanation\|output\|result\|answer\|\)$'
+      continue
+    endif
+    if l:line =~ '^\s*$'
+      continue
+    endif
+    call add(l:filtered, l:line)
+  endfor
+  if !empty(l:filtered)
+    return join(l:filtered, "\n")
+  endif
+  return ''
+endfunction
 endfunction
 
 " Handle explanation response
